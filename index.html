@@ -1,0 +1,757 @@
+<!doctype html><html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"><style>body{margin:0}img{max-width:100%}[hidden]{display:none!important}</style></head><body>
+<title>방드림 첫인상표 메이커</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Noto+Sans+KR:wght@400;500;700;900&display=swap">
+<style>
+/* Layout: control rail on the left, live chart (canvas = exact export) on the right; stacks on phones.
+   Single dark look on purpose: the chart itself is black, so the workspace matches it. */
+:root{
+  --ink:#0c0b0f;        /* page ground */
+  --panel:#17151c;      /* control surfaces */
+  --line:#2b2833;       /* hairlines */
+  --text:#f2eff6;       /* primary text */
+  --mute:#9a93a7;       /* secondary text */
+  --chip:#efebf4;       /* light chip behind band logos */
+  --band:#aa22ee;       /* selected band color, set by script */
+  --band-ink:#ffffff;   /* text on band color, set by script */
+  --f-ui:"Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",system-ui,sans-serif;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+html,body{background:var(--ink);color:var(--text)}
+body{font-family:var(--f-ui);font-size:15px;line-height:1.55;padding-inline:16px;padding-block:20px 96px}
+.wrap{max-width:1180px;margin:0 auto;display:grid;grid-template-columns:340px minmax(0,1fr);gap:28px;align-items:start}
+@media (max-width:860px){.wrap{grid-template-columns:minmax(0,1fr)}}
+
+header.top{max-width:1180px;margin:0 auto 18px;display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}
+header.top h1{font-size:22px;font-weight:900;letter-spacing:-.02em;margin:0}
+header.top p{margin:0;color:var(--mute);font-size:13px}
+
+.rail{display:flex;flex-direction:column;gap:18px;position:sticky;top:calc(env(safe-area-inset-top,0px) + 16px)}
+@media (max-width:860px){.rail{position:static}}
+.sec{display:flex;flex-direction:column;gap:10px}
+.lab{font-size:11px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--mute)}
+.lab b{color:var(--text);letter-spacing:0;text-transform:none;font-size:13px;margin-left:6px}
+
+.bands{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+@media (max-width:860px){.bands{grid-template-columns:repeat(4,minmax(0,1fr))}}
+@media (max-width:480px){.bands{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.band{appearance:none;border:2px solid transparent;background:var(--chip);border-radius:10px;height:54px;padding:6px 8px;cursor:pointer;display:grid;place-items:center;transition:transform .12s,border-color .12s}
+.band img{max-height:34px;max-width:100%;object-fit:contain;display:block}
+.band:hover{transform:translateY(-1px)}
+.band[aria-pressed="true"]{border-color:var(--band);box-shadow:0 0 0 3px color-mix(in srgb,var(--band) 35%,transparent)}
+.band:focus-visible{outline:2px solid var(--text);outline-offset:2px}
+
+.field{display:flex;flex-direction:column;gap:6px}
+.field span{font-size:12px;color:var(--mute)}
+input[type=text]{font:inherit;color:var(--text);background:var(--panel);border:1px solid var(--line);border-radius:8px;padding:9px 11px;width:100%}
+input[type=text]:focus{outline:none;border-color:var(--band)}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.check{display:flex;gap:8px;align-items:center;font-size:13px;color:var(--mute);cursor:pointer}
+.check input{accent-color:var(--band);width:16px;height:16px}
+
+.btn{appearance:none;font:inherit;font-weight:700;font-size:14px;border-radius:10px;padding:11px 14px;cursor:pointer;border:1px solid var(--line);background:var(--panel);color:var(--text);display:inline-flex;gap:8px;align-items:center;justify-content:center}
+.btn:hover{border-color:var(--mute)}
+.btn:focus-visible{outline:2px solid var(--band);outline-offset:2px}
+.btn.primary{background:var(--band);color:var(--band-ink);border-color:transparent}
+.btn.primary:hover{filter:brightness(1.08)}
+.btn:disabled{opacity:.4;cursor:default}
+.btn svg{width:17px;height:17px}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.actions .primary{grid-column:1/-1;padding:14px}
+.hint{font-size:12.5px;color:var(--mute);margin:0}
+.hint kbd{font-family:inherit;font-size:11px;border:1px solid var(--line);border-bottom-width:2px;border-radius:4px;padding:0 5px;color:var(--text)}
+.count{font-variant-numeric:tabular-nums}
+
+/* Stage */
+.stage{display:flex;flex-direction:column;gap:12px;align-items:center;min-width:0}
+.board{position:relative;width:100%;max-width:560px;border-radius:6px;overflow:hidden;box-shadow:0 0 0 1px var(--line),0 24px 60px -30px color-mix(in srgb,var(--band) 60%,transparent)}
+.board canvas{display:block;width:100%;height:auto;background:#000}
+.board.dragging{box-shadow:0 0 0 2px var(--band)}
+.cell{position:absolute;border-radius:2px;cursor:pointer;touch-action:none;border:0;padding:0;background:transparent;color:#fff;font:inherit}
+.cell.empty{border:2px dashed rgba(255,255,255,.28);display:grid;place-items:center;background:rgba(255,255,255,.035)}
+.cell.empty:hover,.cell.over{border-color:var(--band);background:color-mix(in srgb,var(--band) 14%,transparent)}
+.cell .ph{display:flex;flex-direction:column;align-items:center;gap:2px;font-size:clamp(10px,2.1vw,13px);color:rgba(255,255,255,.62);pointer-events:none;text-align:center;line-height:1.3}
+.cell .ph svg{width:clamp(18px,4vw,26px);height:clamp(18px,4vw,26px)}
+.cell.filled{cursor:grab}
+.cell.filled:hover{box-shadow:inset 0 0 0 2px rgba(255,255,255,.5)}
+.cell.filled.panning{cursor:grabbing}
+.cell.sel{box-shadow:inset 0 0 0 3px var(--band),0 0 0 2px #000!important}
+.cell:focus-visible{outline:2px solid #fff;outline-offset:2px}
+
+/* Member row handle: drag the portrait to reorder */
+.rowh{position:absolute;cursor:grab;touch-action:none;border-radius:3px;transition:top .16s ease}
+.rowh:hover{box-shadow:inset 0 0 0 2px rgba(255,255,255,.35)}
+.rowh.lifting{cursor:grabbing;transition:none;z-index:3;box-shadow:inset 0 0 0 3px var(--band),0 10px 30px rgba(0,0,0,.6)}
+.rowh .arrows{position:absolute;right:4%;bottom:4%;display:flex;flex-direction:column;gap:3px;opacity:0;transition:opacity .12s}
+.rowh:hover .arrows,.rowh:focus-within .arrows,.rowh.lifting .arrows{opacity:1}
+@media (hover:none){.rowh .arrows{opacity:.9}}
+.rowh .arrows button{appearance:none;border:0;border-radius:6px;width:clamp(22px,4.4vw,30px);height:clamp(22px,4.4vw,30px);background:rgba(0,0,0,.72);color:#fff;cursor:pointer;display:grid;place-items:center;padding:0}
+.rowh .arrows button:disabled{opacity:.3;cursor:default}
+.rowh .arrows button:focus-visible{outline:2px solid var(--band)}
+.rowh .arrows svg{width:60%;height:60%}
+.rowh .grip{position:absolute;left:4%;top:4%;width:clamp(18px,3.6vw,24px);height:clamp(18px,3.6vw,24px);border-radius:5px;background:rgba(0,0,0,.6);color:#fff;display:grid;place-items:center;opacity:0;transition:opacity .12s;pointer-events:none}
+.rowh:hover .grip,.rowh.lifting .grip{opacity:1}
+@media (hover:none){.rowh .grip{opacity:.9}}
+.rowh .grip svg{width:70%;height:70%}
+.cell{transition:top .16s ease}
+.cell.panning{transition:none}
+
+.editor{width:100%;max-width:560px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:10px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;min-height:58px}
+.editor .msg{font-size:13px;color:var(--mute);flex:1 1 200px;min-width:0}
+.editor .zoom{display:flex;align-items:center;gap:8px;flex:1 1 180px;min-width:0}
+.editor .zoom label{font-size:12px;color:var(--mute);white-space:nowrap}
+.editor input[type=range]{flex:1;accent-color:var(--band);min-width:0}
+.editor .btn{padding:8px 11px;font-size:13px}
+
+.foot{max-width:1180px;margin:28px auto 0;color:var(--mute);font-size:12px;border-top:1px solid var(--line);padding-top:14px}
+.foot a{color:var(--text)}
+
+/* Fallback save sheet */
+.sheet{position:fixed;inset:0;background:rgba(0,0,0,.82);display:grid;place-items:center;padding:20px;z-index:20}
+.sheet .box{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:16px;max-width:420px;width:100%;display:flex;flex-direction:column;gap:12px;max-height:calc(100% - 20px)}
+.sheet img{width:100%;min-height:0;object-fit:contain;border-radius:6px;flex:1}
+.toast{position:fixed;left:50%;bottom:calc(env(safe-area-inset-bottom,0px) + 24px);transform:translateX(-50%);background:var(--text);color:var(--ink);font-weight:700;font-size:13px;padding:10px 16px;border-radius:999px;z-index:30;transition:opacity .2s}
+.toast[hidden]{display:none}
+@media (prefers-reduced-motion:reduce){*{transition:none!important}}
+</style>
+
+<header class="top">
+  <h1>첫인상 / 현인상표 메이커</h1>
+  <p>밴드를 고르고 칸마다 짤을 넣으면 표가 완성돼요.</p>
+</header>
+
+<div class="wrap">
+  <aside class="rail">
+    <section class="sec">
+      <div class="lab">밴드 <b id="bandName">millsage</b></div>
+      <div class="bands" id="bands" role="group" aria-label="밴드 선택"></div>
+    </section>
+
+    <section class="sec">
+      <div class="lab">멤버 순서</div>
+      <p class="hint">표 왼쪽의 캐릭터를 위아래로 끌거나 화살표를 눌러 순서를 바꿀 수 있어요. 기본 순서는 보컬이 맨 앞이에요.</p>
+      <button class="btn" id="orderReset" type="button" disabled>기본 순서로 되돌리기</button>
+    </section>
+
+    <section class="sec">
+      <div class="lab">표 문구</div>
+      <label class="field"><span>제목</span><input type="text" id="tTitle" value="첫인상 / 현인상표" maxlength="20"></label>
+      <div class="row2">
+        <label class="field"><span>왼쪽 열</span><input type="text" id="tCol1" value="첫인상" maxlength="8"></label>
+        <label class="field"><span>오른쪽 열</span><input type="text" id="tCol2" value="현인상" maxlength="8"></label>
+      </div>
+      <label class="check"><input type="checkbox" id="optLogo"> 로고 원래 색으로 표시</label>
+    </section>
+
+    <section class="sec">
+      <div class="lab">사진 <b class="count" id="count">0 / 12</b></div>
+      <div class="actions">
+        <button class="btn" id="bulkBtn" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 8v8M8 12h8"/></svg>
+          빈칸에 한꺼번에</button>
+        <button class="btn" id="clearBtn" type="button">전체 비우기</button>
+        <button class="btn primary" id="saveBtn" type="button">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg>
+          PNG로 저장</button>
+      </div>
+      <p class="hint">칸을 누르거나 사진을 끌어다 놓으세요. 여러 장을 한 번에 놓으면 그 칸부터 차례로 채워져요. 복사한 이미지는 <kbd>Ctrl</kbd>+<kbd>V</kbd>로 붙여넣을 수 있어요.</p>
+    </section>
+  </aside>
+
+  <main class="stage">
+    <div class="board" id="board">
+      <canvas id="cv" width="1152" height="2065" aria-label="첫인상 현인상표 미리보기"></canvas>
+    </div>
+    <div class="editor" id="editor">
+      <span class="msg" id="edMsg">사진이 들어간 칸을 누르면 확대하거나 위치를 옮길 수 있어요. 칸 안에서 끌면 위치가 움직여요.</span>
+    </div>
+  </main>
+</div>
+
+<footer class="foot">
+  밴드·캐릭터 이미지와 데이터: <a href="https://bang-pick.github.io/" target="_blank" rel="noopener">방픽!</a> · BanG Dream! © BanG Dream! Project. 올린 사진은 이 브라우저 안에서만 처리되고 어디에도 업로드되지 않아요.
+</footer>
+
+<input type="file" id="fileIn" accept="image/*" multiple hidden>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+const DATA={"bands":[{"id":"poppin-party","name":"Poppin'Party","color":"#ff3377","logo":"poppipa.webp"},{"id":"afterglow","name":"Afterglow","color":"#ee3344","logo":"afterglow.webp"},{"id":"pastel-palettes","name":"Pastel＊Palettes","color":"#33ddaa","logo":"pasupare.webp"},{"id":"roselia","name":"Roselia","color":"#3344aa","logo":"roselia.webp"},{"id":"hello-happy-world","name":"헬로, 해피 월드!","color":"#ffdd00","logo":"hellohappy.webp"},{"id":"morfonica","name":"Morfonica","color":"#33aaff","logo":"morfonica.webp"},{"id":"raise-a-suilen","name":"RAISE A SUILEN","color":"#33cccc","logo":"ras.webp"},{"id":"mygo","name":"MyGO!!!!!","color":"#0088bb","logo":"mygo.webp"},{"id":"ave-mujica","name":"Ave Mujica","color":"#881144","logo":"avemujica.webp"},{"id":"yumemita","name":"무겐다이 뮤타입","color":"#ff7788","logo":"yumemita.webp"},{"id":"millsage","name":"millsage","color":"#AA22EE","logo":"millsage.webp"},{"id":"ikka-dumbrock","name":"일가 Dumb Rock!","color":"#FFAA33","logo":"dumbrock.webp"}],"chars":[{"id":"toyama-kasumi","name":"토야마 카스미","band":"poppin-party","part":"Gt. & Vo.","image":"kasumi.webp"},{"id":"hanazono-tae","name":"하나조노 타에","band":"poppin-party","part":"Gt.","image":"tae.webp"},{"id":"ushigome-rimi","name":"우시고메 리미","band":"poppin-party","part":"Ba.","image":"rimi.webp"},{"id":"yamabuki-saya","name":"야마부키 사아야","band":"poppin-party","part":"Dr.","image":"saya.webp"},{"id":"ichigaya-arisa","name":"이치가야 아리사","band":"poppin-party","part":"Key.","image":"arisa.webp"},{"id":"mitake-ran","name":"미타케 란","band":"afterglow","part":"Gt. & Vo.","image":"ran.webp"},{"id":"aoba-moca","name":"아오바 모카","band":"afterglow","part":"Gt.","image":"moca.webp"},{"id":"uehara-himari","name":"우에하라 히마리","band":"afterglow","part":"Ba.","image":"himari.webp"},{"id":"udagawa-tomoe","name":"우다가와 토모에","band":"afterglow","part":"Dr.","image":"tomoe.webp"},{"id":"hazawa-tsugumi","name":"하자와 츠구미","band":"afterglow","part":"Key.","image":"tsugumi.webp"},{"id":"maruyama-aya","name":"마루야마 아야","band":"pastel-palettes","part":"Vo.","image":"aya.webp"},{"id":"hikawa-hina","name":"히카와 히나","band":"pastel-palettes","part":"Gt.","image":"hina.webp"},{"id":"shirasagi-chisato","name":"시라사기 치사토","band":"pastel-palettes","part":"Ba.","image":"chisato.webp"},{"id":"yamato-maya","name":"야마토 마야","band":"pastel-palettes","part":"Dr.","image":"maya.webp"},{"id":"wakamiya-eve","name":"와카미야 이브","band":"pastel-palettes","part":"Key.","image":"eve.webp"},{"id":"minato-yukina","name":"미나토 유키나","band":"roselia","part":"Vo.","image":"yukina.webp"},{"id":"hikawa-sayo","name":"히카와 사요","band":"roselia","part":"Gt.","image":"sayo.webp"},{"id":"imai-lisa","name":"이마이 리사","band":"roselia","part":"Ba.","image":"lisa.webp"},{"id":"udagawa-ako","name":"우다가와 아코","band":"roselia","part":"Dr.","image":"ako.webp"},{"id":"shirokane-rinko","name":"시로카네 린코","band":"roselia","part":"Key.","image":"rinko.webp"},{"id":"tsurumaki-kokoro","name":"츠루마키 코코로","band":"hello-happy-world","part":"Vo.","image":"kokoro.webp"},{"id":"seta-kaoru","name":"세타 카오루","band":"hello-happy-world","part":"Gt.","image":"kaoru.webp"},{"id":"kitazawa-hagumi","name":"키타자와 하구미","band":"hello-happy-world","part":"Ba.","image":"hagumi.webp"},{"id":"matsubara-kanon","name":"마츠바라 카논","band":"hello-happy-world","part":"Dr.","image":"kanon.webp"},{"id":"michelle","name":"미셸","band":"hello-happy-world","part":"DJ","image":"misaki.webp"},{"id":"kurata-mashiro","name":"쿠라타 마시로","band":"morfonica","part":"Vo.","image":"mashiro.webp"},{"id":"kirigaya-toko","name":"키리가야 토우코","band":"morfonica","part":"Gt.","image":"toko.webp"},{"id":"hiromachi-nanami","name":"히로마치 나나미","band":"morfonica","part":"Ba.","image":"nanami.webp"},{"id":"futaba-tsukushi","name":"후타바 츠쿠시","band":"morfonica","part":"Dr.","image":"tsukushi.webp"},{"id":"yashio-rui","name":"야시오 루이","band":"morfonica","part":"Vn.","image":"rui.webp"},{"id":"layer-wakana-rei","name":"레이야","band":"raise-a-suilen","part":"Ba. & Vo.","image":"layer.webp"},{"id":"lock-asahi-rokka","name":"록","band":"raise-a-suilen","part":"Gt.","image":"lock.webp"},{"id":"masking-sato-masuki","name":"마스킹","band":"raise-a-suilen","part":"Dr.","image":"masking.webp"},{"id":"pareo-nyubara-reona","name":"파레오","band":"raise-a-suilen","part":"Key.","image":"pareo.webp"},{"id":"chu-tamade-chiyu","name":"츄츄","band":"raise-a-suilen","part":"DJ","image":"chuchu.webp"},{"id":"takamatsu-tomori","name":"타카마츠 토모리","band":"mygo","part":"Vo.","image":"tomori.webp"},{"id":"chihaya-anon","name":"치하야 아논","band":"mygo","part":"Gt.","image":"anon.webp"},{"id":"kaname-rana","name":"카나메 라나","band":"mygo","part":"Gt.","image":"rana.webp"},{"id":"nagasaki-soyo","name":"나가사키 소요","band":"mygo","part":"Ba.","image":"soyo.webp"},{"id":"shiina-taki","name":"시이나 타키","band":"mygo","part":"Dr.","image":"taki.webp"},{"id":"misumi-uika","name":"미스미 우이카","band":"ave-mujica","part":"Gt. & Vo.","image":"uika.webp"},{"id":"wakaba-mutsumi","name":"와카바 무츠미","band":"ave-mujica","part":"Gt.","image":"mutsumi.webp"},{"id":"yahata-umiri","name":"야하타 우미리","band":"ave-mujica","part":"Ba.","image":"umiri.webp"},{"id":"yutenji-nyamu","name":"유텐지 냐무","band":"ave-mujica","part":"Dr.","image":"nyamu.webp"},{"id":"togawa-sakiko","name":"토가와 사키코","band":"ave-mujica","part":"Key.","image":"sakiko.webp"},{"id":"nakamachi-arale","name":"나카마치 아라레","band":"yumemita","part":"Vo.","image":"arale.webp"},{"id":"miyanaga-nonoka","name":"미야나가 노노카","band":"yumemita","part":"Gt.","image":"nonoka.webp"},{"id":"minetsuki-ritsu","name":"미네츠키 리츠","band":"yumemita","part":"Gt.","image":"ritsu.webp"},{"id":"fuji-miyako","name":"후지 미야코","band":"yumemita","part":"Key.","image":"miyako.webp"},{"id":"sengoku-yuno","name":"센고쿠 유노","band":"yumemita","part":"DJ & Mp.","image":"yuno.webp"},{"id":"shiomi-hotaru","name":"시오미 호타루","band":"millsage","part":"Key. & Vo.","image":"hotaru.webp"},{"id":"izawa-natsume","name":"이자와 나츠메","band":"millsage","part":"Gt.","image":"natsume.webp"},{"id":"kotohira-nagi","name":"코토히라 나기","band":"millsage","part":"Gt.","image":"nagi.webp"},{"id":"hamasaki-mahoro","name":"하마사키 마호로","band":"millsage","part":"Ba.","image":"mahoro.webp"},{"id":"izumi-houka","name":"이즈미 호우카","band":"millsage","part":"Dr.","image":"houka.webp"},{"id":"suga-raika","name":"스가 라이카","band":"ikka-dumbrock","part":"Gt. & Vo.","image":"raika.webp"},{"id":"mahashi-miku","name":"마하시 미쿠","band":"ikka-dumbrock","part":"Gt. & Vo.","image":"miku.webp"},{"id":"yakura-yomogi","name":"야쿠라 요모기","band":"ikka-dumbrock","part":"Ba.","image":"yomogi.webp"},{"id":"umezato-chieri","name":"우메자토 치에리","band":"ikka-dumbrock","part":"Dr.","image":"chieri.webp"},{"id":"shinomiya-shizuku","name":"시노미야 시즈쿠","band":"ikka-dumbrock","part":"Key.","image":"shizuku.webp"},{"id":"sawami-kanata","name":"사와미 카나타","band":"millsage","part":"Key. & Vo.","image":"kanata.webp"}]};
+
+// ---------- Layout constants (canvas units) ----------
+const W = 1152, TOP = 295, STEP = 292, CELL = 240, BOTTOM = 70;
+const X_PORTRAIT = 92, X_NAME = 372, X_C1 = 515, X_C2 = 840;
+const FONT = '"Noto Sans KR","Apple SD Gothic Neo","Malgun Gothic",sans-serif';
+
+const KEEP_COLOR_LOGOS = new Set(['ikka-dumbrock', 'hello-happy-world', 'poppin-party']);
+
+// ---------- State ----------
+const cv = document.getElementById('cv');
+const ctx = cv.getContext('2d');
+const board = document.getElementById('board');
+const fileIn = document.getElementById('fileIn');
+const imgCache = new Map();          // url -> HTMLImageElement
+const uploads = new Map();           // `${charId}:${col}` -> {src, zoom, cx, cy}  (kept per member, survives band switching)
+let bandId = 'millsage';
+let members = [];
+let selected = null;                 // key of the selected cell
+let pendingTarget = null;            // where the file picker should drop files
+
+function loadImg(url) {
+  if (imgCache.has(url)) return imgCache.get(url);
+  const im = new Image();
+  im.decoding = 'async';
+  im.src = url;
+  im.onload = () => schedule();
+  imgCache.set(url, im);
+  return im;
+}
+
+// Vocals first; keep the source order otherwise
+function defaultOrder(id) {
+  const list = DATA.chars.filter(c => c.band === id);
+  const isVo = c => /Vo\./.test(c.part);
+  return [...list.filter(isVo), ...list.filter(c => !isVo(c))];
+}
+// Apply a saved custom order if it still matches the band's member set
+function orderMembers(id) {
+  const def = defaultOrder(id);
+  try {
+    const saved = JSON.parse(localStorage.getItem('fi-order-' + id) || 'null');
+    if (Array.isArray(saved) && saved.length === def.length && def.every(m => saved.includes(m.id))) {
+      return saved.map(sid => def.find(m => m.id === sid));
+    }
+  } catch {}
+  return def;
+}
+function isCustomOrder() {
+  return defaultOrder(bandId).some((m, i) => members[i].id !== m.id);
+}
+function saveOrder() {
+  try {
+    if (isCustomOrder()) localStorage.setItem('fi-order-' + bandId, JSON.stringify(members.map(m => m.id)));
+    else localStorage.removeItem('fi-order-' + bandId);
+  } catch {}
+  document.getElementById('orderReset').disabled = !isCustomOrder();
+}
+function moveMember(from, to) {
+  if (to < 0 || to >= members.length || from === to) return;
+  const [m] = members.splice(from, 1);
+  members.splice(to, 0, m);
+  positionOverlays();
+  saveOrder();
+  schedule();
+}
+
+function band() { return DATA.bands.find(b => b.id === bandId); }
+
+// Ordered list of upload slots in reading order
+function slots() {
+  const out = [];
+  members.forEach((m, i) => { out.push({ key: m.id + ':0', row: i, col: 0 }); out.push({ key: m.id + ':1', row: i, col: 1 }); });
+  return out;
+}
+
+// ---------- Color helpers ----------
+function hexRgb(h) {
+  h = h.replace('#', '');
+  if (h.length === 3) h = h.split('').map(c => c + c).join('');
+  return [0, 2, 4].map(i => parseInt(h.slice(i, i + 2), 16));
+}
+function tint(hex, amt) { // mix with white
+  const [r, g, b] = hexRgb(hex);
+  return `rgb(${Math.round(r * amt + 255 * (1 - amt))},${Math.round(g * amt + 255 * (1 - amt))},${Math.round(b * amt + 255 * (1 - amt))})`;
+}
+function inkOn(hex) {
+  const [r, g, b] = hexRgb(hex).map(v => { v /= 255; return v <= .03928 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4; });
+  return (0.2126 * r + 0.7152 * g + 0.0722 * b) > 0.35 ? '#111014' : '#ffffff';
+}
+
+// ---------- Rendering ----------
+let raf = 0;
+function schedule() { if (!raf) raf = requestAnimationFrame(() => { raf = 0; draw(); }); }
+
+function canvasHeight() { return TOP + (members.length - 1) * STEP + CELL + BOTTOM; }
+
+// Paint the logo as a solid white silhouette (works without ctx.filter)
+const logoCanvas = document.createElement('canvas');
+function whiteLogo(im) {
+  logoCanvas.width = im.naturalWidth; logoCanvas.height = im.naturalHeight;
+  const c = logoCanvas.getContext('2d');
+  c.clearRect(0, 0, logoCanvas.width, logoCanvas.height);
+  c.drawImage(im, 0, 0);
+  c.globalCompositeOperation = 'source-in';
+  c.fillStyle = '#fff';
+  c.fillRect(0, 0, logoCanvas.width, logoCanvas.height);
+  c.globalCompositeOperation = 'source-over';
+  return logoCanvas;
+}
+
+function drawUpload(u, x, y) {
+  const im = u.src;
+  const iw = im.width, ih = im.height;
+  const base = Math.max(CELL / iw, CELL / ih) * u.zoom;
+  const w = iw * base, h = ih * base;
+  clampPan(u, w, h);
+  ctx.save();
+  ctx.beginPath(); ctx.rect(x, y, CELL, CELL); ctx.clip();
+  ctx.drawImage(im, x + CELL / 2 - u.cx * w, y + CELL / 2 - u.cy * h, w, h);
+  ctx.restore();
+}
+function clampPan(u, w, h) {
+  const hx = CELL / 2 / w, hy = CELL / 2 / h;
+  u.cx = Math.min(1 - hx, Math.max(hx, u.cx));
+  u.cy = Math.min(1 - hy, Math.max(hy, u.cy));
+}
+
+function draw() {
+  const H = canvasHeight();
+  if (cv.height !== H) { cv.height = H; layoutCells(); }
+  const b = band();
+  ctx.fillStyle = '#000';
+  ctx.fillRect(0, 0, W, H);
+  ctx.textBaseline = 'alphabetic';
+
+  // Title row: logo + title text, centered as one group
+  const title = document.getElementById('tTitle').value;
+  ctx.font = `900 64px ${FONT}`;
+  const tw = ctx.measureText(title).width;
+  const logo = loadImg('img/b/' + b.logo);
+  let lw = 0, lh = 92;
+  if (logo.complete && logo.naturalWidth) {
+    lh = Math.min(92, 92 * 440 / (logo.naturalWidth * 92 / logo.naturalHeight));
+    lw = logo.naturalWidth * lh / logo.naturalHeight;
+  }
+  const gap = lw ? 30 : 0;
+  const gx = (W - (lw + gap + tw)) / 2;
+  if (lw) {
+    // Logos with baked-in outlines/fills turn into a white blob as a silhouette, so they keep their colors
+    const keepColor = KEEP_COLOR_LOGOS.has(b.id) || document.getElementById('optLogo').checked;
+    const src = keepColor ? logo : whiteLogo(logo);
+    ctx.drawImage(src, gx, 112 - lh / 2 - 6, lw, lh);
+  }
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'left';
+  ctx.fillText(title, gx + lw + gap, 134);
+
+  // Column headers
+  ctx.font = `700 44px ${FONT}`;
+  ctx.textAlign = 'center';
+  ctx.fillText(document.getElementById('tCol1').value, X_C1 + CELL / 2, 268);
+  ctx.fillText(document.getElementById('tCol2').value, X_C2 + CELL / 2, 268);
+
+  members.forEach((m, i) => {
+    const y = TOP + i * STEP;
+    // Portrait: band tint behind a bust crop of the character art
+    ctx.fillStyle = tint(b.color, 0.42);
+    ctx.fillRect(X_PORTRAIT, y, CELL, CELL);
+    const im = loadImg('img/c/' + m.image);
+    if (im.complete && im.naturalWidth) {
+      const s = im.naturalWidth * 0.8, sx = (im.naturalWidth - s) / 2;
+      ctx.save(); ctx.beginPath(); ctx.rect(X_PORTRAIT, y, CELL, CELL); ctx.clip();
+      ctx.drawImage(im, sx, 0, s, s, X_PORTRAIT, y, CELL, CELL);
+      ctx.restore();
+    }
+    // Vertical name
+    drawVertical(m.name, X_NAME, y, CELL);
+    // Uploads
+    [X_C1, X_C2].forEach((x, col) => {
+      const u = uploads.get(m.id + ':' + col);
+      if (u) drawUpload(u, x, y);
+    });
+  });
+}
+
+function drawVertical(text, cx, top, height) {
+  const chars = [...text];
+  const units = chars.reduce((n, c) => n + (c === ' ' ? 0.45 : 1), 0);
+  const size = Math.min(40, Math.floor(height / (units * 1.04)));
+  const step = size * 1.04;
+  ctx.font = `700 ${size}px ${FONT}`;
+  ctx.fillStyle = '#fff';
+  ctx.textAlign = 'center';
+  ctx.textBaseline = 'middle';
+  let y = top + (height - units * step) / 2 + step / 2;
+  for (const c of chars) {
+    if (c === ' ') { y += step * 0.45; continue; }
+    ctx.fillText(c, cx, y);
+    y += step;
+  }
+  ctx.textBaseline = 'alphabetic';
+}
+
+// ---------- Overlay cells ----------
+const cellEls = new Map();
+const PLUS = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="9" cy="9" r="1.6"/><path d="M21 15l-5-5L5 21"/></svg>';
+
+const rowEls = new Map();
+const ICON_UP = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 15l6-6 6 6"/></svg>';
+const ICON_DOWN = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M6 9l6 6 6-6"/></svg>';
+const ICON_GRIP = '<svg viewBox="0 0 24 24" fill="currentColor"><circle cx="9" cy="6" r="1.6"/><circle cx="15" cy="6" r="1.6"/><circle cx="9" cy="12" r="1.6"/><circle cx="15" cy="12" r="1.6"/><circle cx="9" cy="18" r="1.6"/><circle cx="15" cy="18" r="1.6"/></svg>';
+const ROW_W = X_NAME + 40 - X_PORTRAIT; // portrait + vertical name
+
+function layoutCells() {
+  cellEls.forEach(el => el.remove());
+  cellEls.clear();
+  rowEls.forEach(el => el.remove());
+  rowEls.clear();
+  slots().forEach(s => {
+    const el = document.createElement('button');
+    el.type = 'button';
+    el.className = 'cell';
+    el.dataset.key = s.key;
+    const m = members[s.row];
+    el.setAttribute('aria-label', `${m.name} ${s.col ? '현인상' : '첫인상'} 사진`);
+    board.appendChild(el);
+    cellEls.set(s.key, el);
+    wireCell(el, s.key);
+  });
+  members.forEach(m => {
+    const el = document.createElement('div');
+    el.className = 'rowh';
+    el.innerHTML = `<span class="grip">${ICON_GRIP}</span><span class="arrows">
+      <button type="button" data-d="-1" aria-label="${m.name} 위로">${ICON_UP}</button>
+      <button type="button" data-d="1" aria-label="${m.name} 아래로">${ICON_DOWN}</button></span>`;
+    board.appendChild(el);
+    rowEls.set(m.id, el);
+    wireRow(el, m.id);
+  });
+  positionOverlays();
+  refreshCells();
+}
+
+// Place every overlay at its member's current row
+function positionOverlays() {
+  const H = canvasHeight();
+  const pct = (v, t) => v / t * 100 + '%';
+  members.forEach((m, i) => {
+    const y = TOP + i * STEP;
+    [X_C1, X_C2].forEach((x, col) => {
+      const el = cellEls.get(m.id + ':' + col);
+      if (el) Object.assign(el.style, { left: pct(x, W), top: pct(y, H), width: pct(CELL, W), height: pct(CELL, H) });
+    });
+    const r = rowEls.get(m.id);
+    if (r) {
+      if (!r.classList.contains('lifting')) r.style.top = pct(y, H);
+      Object.assign(r.style, { left: pct(X_PORTRAIT, W), width: pct(ROW_W, W), height: pct(CELL, H) });
+      r.querySelector('[data-d="-1"]').disabled = i === 0;
+      r.querySelector('[data-d="1"]').disabled = i === members.length - 1;
+    }
+  });
+}
+
+// Drag a member row up or down; the order updates live while dragging
+function wireRow(el, id) {
+  let drag = null;
+  el.querySelectorAll('.arrows button').forEach(b => {
+    b.addEventListener('pointerdown', e => e.stopPropagation());
+    b.addEventListener('click', () => {
+      const i = members.findIndex(m => m.id === id);
+      moveMember(i, i + +b.dataset.d);
+      el.querySelector(`[data-d="${b.dataset.d}"]`).focus();
+    });
+  });
+  el.addEventListener('pointerdown', e => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    const rect = board.getBoundingClientRect();
+    drag = { k: canvasHeight() / rect.height, startY: e.clientY, startTop: TOP + members.findIndex(m => m.id === id) * STEP };
+    el.setPointerCapture(e.pointerId);
+    el.classList.add('lifting');
+    select(null);
+  });
+  el.addEventListener('pointermove', e => {
+    if (!drag) return;
+    const H = canvasHeight();
+    const maxTop = TOP + (members.length - 1) * STEP;
+    const top = Math.min(maxTop, Math.max(TOP, drag.startTop + (e.clientY - drag.startY) * drag.k));
+    el.style.top = top / H * 100 + '%';
+    const target = Math.round((top - TOP) / STEP);
+    const cur = members.findIndex(m => m.id === id);
+    if (target !== cur) moveMember(cur, target);
+  });
+  const end = () => {
+    if (!drag) return;
+    drag = null;
+    el.classList.remove('lifting');
+    positionOverlays();
+  };
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointercancel', end);
+}
+
+document.getElementById('orderReset').onclick = () => {
+  members = defaultOrder(bandId);
+  positionOverlays();
+  saveOrder();
+  schedule();
+  toast('기본 순서로 되돌렸어요');
+};
+
+function refreshCells() {
+  let n = 0;
+  cellEls.forEach((el, key) => {
+    const has = uploads.has(key);
+    if (has) n++;
+    el.classList.toggle('filled', has);
+    el.classList.toggle('empty', !has);
+    el.classList.toggle('sel', key === selected);
+    el.innerHTML = has ? '' : `<span class="ph">${PLUS}<span>${key.endsWith(':0') ? '첫인상' : '현인상'}<br>사진 추가</span></span>`;
+  });
+  document.getElementById('count').textContent = `${n} / ${cellEls.size}`;
+  renderEditor();
+}
+
+function wireCell(el, key) {
+  // Click: empty -> file picker, filled -> select
+  let moved = false, start = null;
+  el.addEventListener('pointerdown', e => {
+    if (!uploads.has(key) || e.button !== 0) return;
+    moved = false;
+    start = { x: e.clientX, y: e.clientY, u: uploads.get(key) };
+    el.setPointerCapture(e.pointerId);
+  });
+  el.addEventListener('pointermove', e => {
+    if (!start) return;
+    const dx = e.clientX - start.x, dy = e.clientY - start.y;
+    if (!moved && Math.hypot(dx, dy) < 4) return;
+    if (!moved) { moved = true; select(key); el.classList.add('panning'); }
+    const k = W / cv.getBoundingClientRect().width;
+    const u = start.u, im = u.src;
+    const base = Math.max(CELL / im.width, CELL / im.height) * u.zoom;
+    u.cx -= dx * k / (im.width * base);
+    u.cy -= dy * k / (im.height * base);
+    start.x = e.clientX; start.y = e.clientY;
+    schedule();
+  });
+  const end = () => { start = null; el.classList.remove('panning'); };
+  el.addEventListener('pointerup', end);
+  el.addEventListener('pointercancel', end);
+  el.addEventListener('click', () => {
+    if (moved) { moved = false; return; }
+    if (uploads.has(key)) select(key === selected ? null : key);
+    else openPicker(key);
+  });
+  el.addEventListener('dblclick', () => { if (uploads.has(key)) openPicker(key); });
+  el.addEventListener('wheel', e => {
+    if (!uploads.has(key) || key !== selected) return;
+    e.preventDefault();
+    const u = uploads.get(key);
+    u.zoom = Math.min(4, Math.max(1, u.zoom * (e.deltaY < 0 ? 1.08 : 1 / 1.08)));
+    syncZoom(); schedule();
+  }, { passive: false });
+  // Drag & drop files onto this exact cell
+  el.addEventListener('dragover', e => { if (hasFiles(e)) { e.preventDefault(); e.stopPropagation(); el.classList.add('over'); } });
+  el.addEventListener('dragleave', () => el.classList.remove('over'));
+  el.addEventListener('drop', e => {
+    el.classList.remove('over'); board.classList.remove('dragging');
+    if (!hasFiles(e)) return;
+    e.preventDefault(); e.stopPropagation();
+    placeFiles([...e.dataTransfer.files], key, true);
+  });
+}
+
+function hasFiles(e) { return e.dataTransfer && [...e.dataTransfer.types].includes('Files'); }
+
+function openPicker(key) { pendingTarget = key; fileIn.value = ''; fileIn.click(); }
+fileIn.addEventListener('change', () => {
+  placeFiles([...fileIn.files], pendingTarget, pendingTarget !== null);
+  pendingTarget = null;
+});
+
+// Put files into cells: the first goes to `startKey` (overwriting), the rest fill the next empty cells
+async function placeFiles(files, startKey, overwriteFirst) {
+  files = files.filter(f => f.type.startsWith('image/'));
+  if (!files.length) { toast('이미지 파일만 넣을 수 있어요'); return; }
+  const order = slots().map(s => s.key);
+  let targets = [];
+  let i = startKey ? order.indexOf(startKey) : 0;
+  if (startKey && overwriteFirst) { targets.push(startKey); i++; }
+  for (; i < order.length && targets.length < files.length; i++) if (!uploads.has(order[i])) targets.push(order[i]);
+  // Wrap around to earlier empty cells if needed
+  for (let j = 0; j < order.length && targets.length < files.length; j++) if (!uploads.has(order[j]) && !targets.includes(order[j])) targets.push(order[j]);
+  if (!targets.length) { toast('빈칸이 없어요. 칸을 눌러 교체해 주세요'); return; }
+  const skipped = files.length - targets.length;
+  for (let k = 0; k < targets.length; k++) {
+    try {
+      const src = await decodeFile(files[k]);
+      uploads.set(targets[k], { src, zoom: 1, cx: 0.5, cy: 0.5 });
+    } catch { toast('이 이미지는 열 수 없어요'); }
+  }
+  select(targets.length === 1 ? targets[0] : selected);
+  refreshCells(); schedule();
+  if (skipped > 0) toast(`빈칸이 모자라서 ${skipped}장은 넣지 못했어요`);
+}
+
+// Decode and shrink large photos so the page stays fast
+function decodeFile(file) {
+  return new Promise((res, rej) => {
+    const url = URL.createObjectURL(file);
+    const im = new Image();
+    im.onload = () => {
+      const max = 1200, s = Math.min(1, max / Math.max(im.naturalWidth, im.naturalHeight));
+      const c = document.createElement('canvas');
+      c.width = Math.round(im.naturalWidth * s); c.height = Math.round(im.naturalHeight * s);
+      c.getContext('2d').drawImage(im, 0, 0, c.width, c.height);
+      URL.revokeObjectURL(url);
+      res(c);
+    };
+    im.onerror = () => { URL.revokeObjectURL(url); rej(); };
+    im.src = url;
+  });
+}
+
+// Drop anywhere on the board/page: fill empty cells in order
+board.addEventListener('dragover', e => { if (hasFiles(e)) { e.preventDefault(); board.classList.add('dragging'); } });
+board.addEventListener('dragleave', e => { if (e.target === board || !board.contains(e.relatedTarget)) board.classList.remove('dragging'); });
+board.addEventListener('drop', e => { board.classList.remove('dragging'); if (hasFiles(e)) { e.preventDefault(); placeFiles([...e.dataTransfer.files], null, false); } });
+window.addEventListener('dragover', e => { if (hasFiles(e)) e.preventDefault(); });
+window.addEventListener('drop', e => { if (hasFiles(e)) { e.preventDefault(); placeFiles([...e.dataTransfer.files], null, false); } });
+
+// Paste from clipboard: into the selected cell, else the next empty one
+window.addEventListener('paste', e => {
+  if (e.target.matches && e.target.matches('input[type=text]')) return;
+  const files = [...(e.clipboardData?.files || [])].filter(f => f.type.startsWith('image/'));
+  if (!files.length) return;
+  e.preventDefault();
+  placeFiles(files, selected, selected !== null);
+});
+
+window.addEventListener('keydown', e => {
+  if (!selected || e.target.matches('input')) return;
+  if (e.key === 'Delete' || e.key === 'Backspace') { e.preventDefault(); removeSel(); }
+  if (e.key === 'Escape') select(null);
+});
+
+// ---------- Editor bar ----------
+const editor = document.getElementById('editor');
+function select(key) { selected = key; refreshCells(); }
+function removeSel() { if (!selected) return; uploads.delete(selected); selected = null; refreshCells(); schedule(); }
+function syncZoom() { const z = document.getElementById('zoom'); if (z && selected) z.value = uploads.get(selected).zoom; }
+
+function renderEditor() {
+  if (!selected || !uploads.has(selected)) {
+    editor.innerHTML = '<span class="msg">사진이 들어간 칸을 누르면 확대하거나 위치를 옮길 수 있어요. 칸 안에서 끌면 위치가 움직여요.</span>';
+    return;
+  }
+  const [id, col] = selected.split(':');
+  const m = DATA.chars.find(c => c.id === id);
+  const u = uploads.get(selected);
+  editor.innerHTML = `
+    <span class="msg"><b style="color:var(--text)">${m.name}</b> · ${col === '0' ? document.getElementById('tCol1').value : document.getElementById('tCol2').value}</span>
+    <div class="zoom"><label for="zoom">확대</label><input type="range" id="zoom" min="1" max="4" step="0.01" value="${u.zoom}"></div>
+    <button class="btn" type="button" id="edReset">맞춤</button>
+    <button class="btn" type="button" id="edReplace">교체</button>
+    <button class="btn" type="button" id="edRemove">비우기</button>`;
+  document.getElementById('zoom').addEventListener('input', e => { u.zoom = +e.target.value; schedule(); });
+  document.getElementById('edReset').onclick = () => { u.zoom = 1; u.cx = u.cy = 0.5; syncZoom(); schedule(); };
+  document.getElementById('edReplace').onclick = () => openPicker(selected);
+  document.getElementById('edRemove').onclick = removeSel;
+}
+
+// ---------- Rail controls ----------
+const bandsEl = document.getElementById('bands');
+DATA.bands.forEach(b => {
+  const btn = document.createElement('button');
+  btn.type = 'button'; btn.className = 'band'; btn.dataset.id = b.id;
+  btn.title = b.name; btn.setAttribute('aria-label', b.name);
+  btn.innerHTML = `<img src="img/b/${b.logo}" alt="">`;
+  btn.onclick = () => setBand(b.id);
+  bandsEl.appendChild(btn);
+});
+
+function setBand(id) {
+  bandId = id;
+  const b = band();
+  members = orderMembers(id);
+  members.forEach(m => loadImg('img/c/' + m.image));
+  selected = null;
+  document.querySelectorAll('.band').forEach(el => el.setAttribute('aria-pressed', el.dataset.id === id));
+  document.getElementById('bandName').textContent = b.name;
+  document.documentElement.style.setProperty('--band', b.color);
+  document.documentElement.style.setProperty('--band-ink', inkOn(b.color));
+  try { localStorage.setItem('fi-band', id); } catch {}
+  document.getElementById('orderReset').disabled = !isCustomOrder();
+  // The color toggle does nothing for logos that always keep their colors
+  const opt = document.getElementById('optLogo');
+  opt.disabled = KEEP_COLOR_LOGOS.has(id);
+  opt.closest('label').style.opacity = opt.disabled ? .45 : 1;
+  cv.height = canvasHeight();
+  layoutCells();
+  draw();
+}
+
+['tTitle', 'tCol1', 'tCol2', 'optLogo'].forEach(id => document.getElementById(id).addEventListener('input', () => { schedule(); if (id !== 'tTitle') renderEditor(); }));
+
+document.getElementById('bulkBtn').onclick = () => openPicker(null);
+fileIn.addEventListener('click', () => {});
+
+let clearArm = 0;
+document.getElementById('clearBtn').onclick = e => {
+  const btn = e.currentTarget;
+  const keys = slots().map(s => s.key).filter(k => uploads.has(k));
+  if (!keys.length) { toast('비울 사진이 없어요'); return; }
+  if (!clearArm) {
+    btn.textContent = '한 번 더 누르면 비워요';
+    clearArm = setTimeout(() => { clearArm = 0; btn.textContent = '전체 비우기'; }, 2500);
+    return;
+  }
+  clearTimeout(clearArm); clearArm = 0; btn.textContent = '전체 비우기';
+  keys.forEach(k => uploads.delete(k)); selected = null; refreshCells(); schedule();
+  toast('이 밴드의 사진을 모두 비웠어요');
+};
+
+// ---------- Export ----------
+let downloads = null;
+if (window.claude?.use) window.claude.use('downloads').then(d => { downloads = d; }).catch(() => {});
+
+document.getElementById('saveBtn').onclick = async () => {
+  const sel = selected; selected = null; draw(); selected = sel;
+  const blob = await new Promise(r => cv.toBlob(r, 'image/png'));
+  const name = `${band().name.replace(/[\\/:*?"<>|＊]/g, '')}_첫인상현인상표.png`;
+  if (downloads) {
+    try { await downloads.save({ filename: name, data: blob }); toast('저장했어요'); return; }
+    catch (err) { if (err && err.code === 'declined') return; if (err && err.code === 'rate_limited') { toast('잠시 후 다시 눌러 주세요'); return; } }
+  }
+  // Hosted outside Claude (e.g. GitHub Pages): a normal download link works
+  if (!window.claude) {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob); a.download = name;
+    document.body.appendChild(a); a.click(); a.remove();
+    setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+    return;
+  }
+  showSheet(blob);
+};
+
+function showSheet(blob) {
+  const url = URL.createObjectURL(blob);
+  const sheet = document.createElement('div');
+  sheet.className = 'sheet';
+  sheet.innerHTML = `<div class="box"><p class="hint">이미지를 길게 누르거나 오른쪽 클릭해서 저장하세요.</p><img alt="완성된 첫인상 현인상표" src="${url}"><button class="btn" type="button">닫기</button></div>`;
+  const close = () => { sheet.remove(); URL.revokeObjectURL(url); };
+  sheet.querySelector('button').onclick = close;
+  sheet.addEventListener('click', e => { if (e.target === sheet) close(); });
+  document.body.appendChild(sheet);
+}
+
+let toastT = 0;
+function toast(msg) {
+  const t = document.getElementById('toast');
+  t.textContent = msg; t.hidden = false;
+  clearTimeout(toastT); toastT = setTimeout(() => { t.hidden = true; }, 2200);
+}
+
+// ---------- Boot ----------
+let startBand = 'millsage';
+try { const s = localStorage.getItem('fi-band'); if (s && DATA.bands.some(b => b.id === s)) startBand = s; } catch {}
+setBand(startBand);
+if (document.fonts) {
+  Promise.all([document.fonts.load(`900 64px ${FONT}`, '첫인상'), document.fonts.load(`700 40px ${FONT}`, '첫인상')]).then(schedule);
+  document.fonts.ready.then(schedule);
+}
+</script>
+
+</body></html>
